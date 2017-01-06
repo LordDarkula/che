@@ -11,6 +11,7 @@
 package org.eclipse.che.api.workspace.server;
 
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import com.google.inject.Inject;
 
 import org.eclipse.che.commons.lang.concurrent.LoggingUncaughtExceptionHandler;
 import org.eclipse.che.commons.lang.concurrent.ThreadLocalPropagateContext;
@@ -18,11 +19,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.PostConstruct;
+import javax.inject.Named;
 import javax.inject.Singleton;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -35,12 +38,18 @@ public class WorkspaceSharedPool {
 
     private final ExecutorService executor;
 
-    public WorkspaceSharedPool() {
-        executor = Executors.newFixedThreadPool(2 * Runtime.getRuntime().availableProcessors(),
-                                                new ThreadFactoryBuilder().setNameFormat("WorkspaceSharedPool-%d")
-                                                                          .setUncaughtExceptionHandler(LoggingUncaughtExceptionHandler.getInstance())
-                                                                          .setDaemon(false)
-                                                                          .build());
+    @Named("workspace.threads_pool.size")
+    @Inject(optional = true)
+    public WorkspaceSharedPool(Integer poolSize) {
+        ThreadFactory factory = new ThreadFactoryBuilder().setNameFormat("WorkspaceSharedPool-%d")
+                                                          .setUncaughtExceptionHandler(LoggingUncaughtExceptionHandler.getInstance())
+                                                          .setDaemon(false)
+                                                          .build();
+        if (poolSize == null) {
+            executor = Executors.newCachedThreadPool(factory);
+        } else {
+            executor = Executors.newFixedThreadPool(poolSize, factory);
+        }
     }
 
     /** Returns an {@link ExecutorService} managed by this pool instance. */
@@ -66,7 +75,11 @@ public class WorkspaceSharedPool {
 
     /**
      * Terminates this pool, may be called multiple times,
-     * waits until pool is terminated or timeout reached.
+     * waits until pool is terminated or timeout is reached.
+     *
+     * <p>Please note that the method is not designed to be used from
+     * different threads, but the other components may use it in their
+     * post construct methods to ensure that all the tasks finished their execution.
      *
      * @return true if executor successfully terminated and false if not
      * terminated(either await termination timeout is reached or thread was interrupted)

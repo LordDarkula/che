@@ -99,7 +99,8 @@ import static org.slf4j.LoggerFactory.getLogger;
 @Singleton
 public class CheEnvironmentEngine {
 
-    private static final Logger LOG = getLogger(CheEnvironmentEngine.class);
+    private static final NoOpStartedHandler NO_OP_HANDLER = new NoOpStartedHandler();
+    private static final Logger             LOG           = getLogger(CheEnvironmentEngine.class);
 
     private final Map<String, EnvironmentHolder> environments;
     private final StripedLocks                   stripedLocks;
@@ -166,7 +167,7 @@ public class CheEnvironmentEngine {
      */
     public List<Instance> getMachines(String workspaceId) throws EnvironmentNotRunningException {
         EnvironmentHolder environment;
-        try (CloseableLock lock = stripedLocks.acquireReadLock(workspaceId)) {
+        try (CloseableLock lock = stripedLocks.readLock(workspaceId)) {
             environment = environments.get(workspaceId);
             if (environment == null) {
                 throw new EnvironmentNotRunningException("Environment with ID '" + workspaceId + "' is not found");
@@ -190,7 +191,7 @@ public class CheEnvironmentEngine {
      */
     public Instance getMachine(String workspaceId, String machineId) throws NotFoundException {
         EnvironmentHolder environment;
-        try (CloseableLock lock = stripedLocks.acquireReadLock(workspaceId)) {
+        try (CloseableLock lock = stripedLocks.readLock(workspaceId)) {
             environment = environments.get(workspaceId);
         }
         if (environment == null) {
@@ -206,8 +207,8 @@ public class CheEnvironmentEngine {
 
     /**
      * Starts provided environment.
-     * <p/>
-     * Environment starts if and only all machines in environment definition start successfully.<br/>
+     *
+     * <p>Environment starts if and only all machines in environment definition start successfully.<br/>
      * Otherwise exception is thrown by this method.<br/>
      * It is not defined whether environment start fails right after first failure or in the end of the process.<br/>
      * Starting order of machines is not guarantied. Machines can start sequentially or in parallel.
@@ -222,6 +223,8 @@ public class CheEnvironmentEngine {
      *         whether machines from environment should be recovered or not
      * @param messageConsumer
      *         consumer of log messages from machines in the environment
+     * @param startedHandler
+     *         handler for started machines
      * @return list of running machines of this environment
      * @throws ServerException
      *         if other error occurs
@@ -230,9 +233,10 @@ public class CheEnvironmentEngine {
                                 String envName,
                                 Environment env,
                                 boolean recover,
-                                MessageConsumer<MachineLogMessage> messageConsumer) throws ServerException,
-                                                                                           ConflictException,
-                                                                                           EnvironmentException {
+                                MessageConsumer<MachineLogMessage> messageConsumer,
+                                MachineStartedHandler startedHandler) throws ServerException,
+                                                                             EnvironmentException,
+                                                                             ConflictException {
         // TODO move to machines provider
         // add random chars to ensure that old environments that weren't removed by some reason won't prevent start
         String networkId = NameGenerator.generate(workspaceId + "_", 16);
@@ -252,9 +256,10 @@ public class CheEnvironmentEngine {
                               workspaceId,
                               devMachineName,
                               networkId,
-                              recover);
+                              recover,
+                              startedHandler);
 
-        try (CloseableLock lock = stripedLocks.acquireWriteLock(workspaceId)) {
+        try (CloseableLock lock = stripedLocks.writeLock(workspaceId)) {
             EnvironmentHolder environmentHolder = environments.get(workspaceId);
             // possible only if environment was stopped during its start
             if (environmentHolder == null) {
@@ -264,6 +269,21 @@ public class CheEnvironmentEngine {
             // prevent list modification
             return new ArrayList<>(environmentHolder.machines);
         }
+    }
+
+    /**
+     * Starts workspace environment.
+     *
+     * @see #start(String, String, Environment, boolean, MessageConsumer, MachineStartedHandler)
+     */
+    public List<Instance> start(String workspaceId,
+                                String envName,
+                                Environment env,
+                                boolean recover,
+                                MessageConsumer<MachineLogMessage> messageConsumer) throws ServerException,
+                                                                                           ConflictException,
+                                                                                           EnvironmentException {
+        return start(workspaceId, envName, env, recover, messageConsumer, NO_OP_HANDLER);
     }
 
     /**
@@ -280,7 +300,7 @@ public class CheEnvironmentEngine {
                                                 ServerException {
         List<Instance> machinesCopy = null;
         EnvironmentHolder environmentHolder;
-        try (CloseableLock lock = stripedLocks.acquireReadLock(workspaceId)) {
+        try (CloseableLock lock = stripedLocks.readLock(workspaceId)) {
             environmentHolder = environments.get(workspaceId);
             if (environmentHolder == null || environmentHolder.status != EnvStatus.RUNNING) {
                 throw new EnvironmentNotRunningException(
@@ -298,7 +318,7 @@ public class CheEnvironmentEngine {
             destroyEnvironment(environmentHolder.networkId, machinesCopy);
         }
 
-        try (CloseableLock lock = stripedLocks.acquireWriteLock(workspaceId)) {
+        try (CloseableLock lock = stripedLocks.writeLock(workspaceId)) {
             environments.remove(workspaceId);
         }
     }
@@ -329,7 +349,7 @@ public class CheEnvironmentEngine {
 
         MachineConfig machineConfigCopy = new MachineConfigImpl(machineConfig);
         EnvironmentHolder environmentHolder;
-        try (CloseableLock lock = stripedLocks.acquireReadLock(workspaceId)) {
+        try (CloseableLock lock = stripedLocks.readLock(workspaceId)) {
             environmentHolder = environments.get(workspaceId);
             if (environmentHolder == null || environmentHolder.status != EnvStatus.RUNNING) {
                 throw new EnvironmentNotRunningException(format("Environment '%s' is not running", workspaceId));
@@ -424,7 +444,7 @@ public class CheEnvironmentEngine {
                                                                          ServerException,
                                                                          ConflictException {
         Instance targetMachine = null;
-        try (CloseableLock lock = stripedLocks.acquireWriteLock(workspaceId)) {
+        try (CloseableLock lock = stripedLocks.writeLock(workspaceId)) {
             EnvironmentHolder environmentHolder = environments.get(workspaceId);
             if (environmentHolder == null || environmentHolder.status != EnvStatus.RUNNING) {
                 throw new EnvironmentNotRunningException(format("Environment '%s' is not running", workspaceId));
@@ -453,8 +473,6 @@ public class CheEnvironmentEngine {
     /**
      * Saves machine into snapshot.
      *
-     * @param namespace
-     *         namespace of the workspace
      * @param workspaceId
      *         ID of workspace that owns environment
      * @param machineId
@@ -473,7 +491,7 @@ public class CheEnvironmentEngine {
         EnvironmentHolder environmentHolder;
         SnapshotImpl snapshot = null;
         Instance instance = null;
-        try (CloseableLock lock = stripedLocks.acquireReadLock(workspaceId)) {
+        try (CloseableLock lock = stripedLocks.readLock(workspaceId)) {
             environmentHolder = environments.get(workspaceId);
             if (environmentHolder == null || environmentHolder.status != EnvStatus.RUNNING) {
                 throw new EnvironmentNotRunningException(format("Environment '%s' is not running", workspaceId));
@@ -558,7 +576,7 @@ public class CheEnvironmentEngine {
                                                                     envName,
                                                                     networkId);
 
-        try (CloseableLock lock = stripedLocks.acquireWriteLock(workspaceId)) {
+        try (CloseableLock lock = stripedLocks.writeLock(workspaceId)) {
             if (environments.putIfAbsent(workspaceId, environmentHolder) != null) {
                 throw new ConflictException(format("Environment of workspace '%s' already exists", workspaceId));
             }
@@ -711,7 +729,8 @@ public class CheEnvironmentEngine {
                                        String workspaceId,
                                        String devMachineName,
                                        String networkId,
-                                       boolean recover)
+                                       boolean recover,
+                                       MachineStartedHandler startedHandler)
             throws ServerException,
                    EnvironmentException {
         // Starting all machines in environment one by one by getting configs
@@ -719,7 +738,7 @@ public class CheEnvironmentEngine {
         // Config will be null only if there are no machines left in the queue
         String envName;
         MessageConsumer<MachineLogMessage> envLogger;
-        try (CloseableLock lock = stripedLocks.acquireReadLock(workspaceId)) {
+        try (CloseableLock lock = stripedLocks.readLock(workspaceId)) {
             EnvironmentHolder environmentHolder = environments.get(workspaceId);
             if (environmentHolder == null) {
                 throw new ServerException("Environment start is interrupted.");
@@ -740,7 +759,7 @@ public class CheEnvironmentEngine {
                 String creator = EnvironmentContext.getCurrent().getSubject().getUserId();
 
                 CheServiceImpl service;
-                try (CloseableLock lock = stripedLocks.acquireReadLock(workspaceId)) {
+                try (CloseableLock lock = stripedLocks.readLock(workspaceId)) {
                     EnvironmentHolder environmentHolder = environments.get(workspaceId);
                     if (environmentHolder == null) {
                         throw new ServerException("Environment start is interrupted.");
@@ -791,6 +810,7 @@ public class CheEnvironmentEngine {
                                                   envLogger,
                                                   machine,
                                                   machineStarter);
+                startedHandler.started(instance);
 
                 // Machine destroying is an expensive operation which must be
                 // performed outside of the lock, this section checks if
@@ -798,7 +818,7 @@ public class CheEnvironmentEngine {
                 // polled flag to true if the environment wasn't stopped.
                 // Also polls the proceeded machine configuration from the queue
                 boolean queuePolled = false;
-                try (CloseableLock lock = stripedLocks.acquireWriteLock(workspaceId)) {
+                try (CloseableLock lock = stripedLocks.writeLock(workspaceId)) {
                     ensurePreDestroyIsNotExecuted();
                     EnvironmentHolder environmentHolder = environments.get(workspaceId);
                     if (environmentHolder != null) {
@@ -843,7 +863,7 @@ public class CheEnvironmentEngine {
             }
         } catch (RuntimeException | ServerException e) {
             EnvironmentHolder env;
-            try (CloseableLock lock = stripedLocks.acquireWriteLock(workspaceId)) {
+            try (CloseableLock lock = stripedLocks.writeLock(workspaceId)) {
                 env = environments.remove(workspaceId);
             }
 
@@ -1004,7 +1024,7 @@ public class CheEnvironmentEngine {
 
     private void addMachine(MachineImpl machine) throws ServerException {
         Instance instance = new NoOpMachineInstance(machine);
-        try (CloseableLock lock = stripedLocks.acquireWriteLock(machine.getWorkspaceId())) {
+        try (CloseableLock lock = stripedLocks.writeLock(machine.getWorkspaceId())) {
             ensurePreDestroyIsNotExecuted();
             EnvironmentHolder environmentHolder = environments.get(machine.getWorkspaceId());
             if (environmentHolder != null && environmentHolder.status != EnvStatus.STOPPING) {
@@ -1023,7 +1043,7 @@ public class CheEnvironmentEngine {
 
     private void removeMachine(String workspaceId,
                                String machineId) {
-        try (CloseableLock lock = stripedLocks.acquireWriteLock(workspaceId)) {
+        try (CloseableLock lock = stripedLocks.writeLock(workspaceId)) {
             EnvironmentHolder environmentHolder = environments.get(workspaceId);
             if (environmentHolder != null) {
                 for (Instance machine : environmentHolder.machines) {
@@ -1037,7 +1057,7 @@ public class CheEnvironmentEngine {
     }
 
     private void replaceMachine(Instance machine) throws ServerException {
-        try (CloseableLock lock = stripedLocks.acquireWriteLock(machine.getWorkspaceId())) {
+        try (CloseableLock lock = stripedLocks.writeLock(machine.getWorkspaceId())) {
             ensurePreDestroyIsNotExecuted();
             EnvironmentHolder environmentHolder = environments.get(machine.getWorkspaceId());
             if (environmentHolder != null) {
@@ -1077,7 +1097,7 @@ public class CheEnvironmentEngine {
      *         if pre destroy has been invoked before peek config retrieved
      */
     private String queuePeekOrFail(String workspaceId) throws ServerException {
-        try (CloseableLock lock = stripedLocks.acquireReadLock(workspaceId)) {
+        try (CloseableLock lock = stripedLocks.readLock(workspaceId)) {
             ensurePreDestroyIsNotExecuted();
             EnvironmentHolder environmentHolder = environments.get(workspaceId);
             if (environmentHolder == null || environmentHolder.startQueue == null) {
@@ -1283,7 +1303,7 @@ public class CheEnvironmentEngine {
         public void onEvent(InstanceStateEvent event) {
             if ((event.getType() == OOM) || (event.getType() == DIE)) {
                 EnvironmentHolder environmentHolder;
-                try (CloseableLock lock = stripedLocks.acquireReadLock("workspaceId")) {
+                try (CloseableLock lock = stripedLocks.readLock("workspaceId")) {
                     environmentHolder = environments.get(event.getWorkspaceId());
                 }
                 if (environmentHolder != null) {
@@ -1316,5 +1336,10 @@ public class CheEnvironmentEngine {
                 }
             }
         }
+    }
+
+    private static class NoOpStartedHandler implements MachineStartedHandler {
+        @Override
+        public void started(Instance machine) throws ServerException {}
     }
 }

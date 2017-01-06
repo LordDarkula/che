@@ -20,15 +20,15 @@ import java.util.concurrent.locks.ReadWriteLock;
  * Examples of usage:
  * <pre class="code"><code class="java">
  *     StripedLocks stripedLocks = new StripedLocks(16);
- *     try (CloseableLock lock = stripedLocks.acquireWriteLock(myKey)) {
+ *     try (CloseableLock lock = stripedLocks.writeLock(myKey)) {
  *         syncedObject.write();
  *     }
  *
- *     try (CloseableLock lock = stripedLocks.acquireReadLock(myKey)) {
+ *     try (CloseableLock lock = stripedLocks.readLock(myKey)) {
  *         syncedObject.read();
  *     }
  *
- *     try (CloseableLock lock = stripedLocks.acquireWriteAllLock(myKey)) {
+ *     try (CloseableLock lock = stripedLocks.writeAllLock(myKey)) {
  *         for (ObjectToSync objectToSync : allObjectsToSync) {
  *             objectToSync.write();
  *         }
@@ -49,21 +49,21 @@ public class StripedLocks {
     /**
      * Acquire read lock for provided key.
      */
-    public CloseableLock acquireReadLock(String key) {
+    public CloseableLock readLock(String key) {
         return new ReadLock(key);
     }
 
     /**
      * Acquire write lock for provided key.
      */
-    public CloseableLock acquireWriteLock(String key) {
+    public CloseableLock writeLock(String key) {
         return new WriteLock(key);
     }
 
     /**
      * Acquire write lock for all possible keys.
      */
-    public CloseableLock acquireWriteAllLock() {
+    public CloseableLock writeAllLock() {
         return new WriteAllLock();
     }
 
