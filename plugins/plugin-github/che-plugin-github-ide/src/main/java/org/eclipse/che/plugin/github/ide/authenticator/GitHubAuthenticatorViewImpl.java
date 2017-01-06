@@ -13,7 +13,9 @@ package org.eclipse.che.plugin.github.ide.authenticator;
 import com.google.gwt.dom.client.Style;
 import com.google.gwt.user.client.ui.CheckBox;
 import com.google.gwt.user.client.ui.DockLayoutPanel;
+import com.google.gwt.user.client.ui.FlowPanel;
 import com.google.gwt.user.client.ui.InlineHTML;
+import com.google.gwt.user.client.ui.Label;
 import com.google.gwt.user.client.ui.Widget;
 import com.google.inject.Inject;
 
@@ -22,6 +24,8 @@ import org.eclipse.che.plugin.github.ide.GitHubLocalizationConstant;
 import org.eclipse.che.ide.api.dialogs.CancelCallback;
 import org.eclipse.che.ide.api.dialogs.ConfirmCallback;
 import org.eclipse.che.ide.api.dialogs.DialogFactory;
+
+import static org.eclipse.che.ide.api.theme.Style.getLinkColor;
 
 /**
  * @author Roman Nikitenko
@@ -47,7 +51,12 @@ public class GitHubAuthenticatorViewImpl implements GitHubAuthenticatorView {
         isGenerateKeys.setValue(true);
 
         contentPanel = new DockLayoutPanel(Style.Unit.PX);
-        contentPanel.addNorth(new InlineHTML(locale.authorizationDialogText(productInfoDataProvider.getName())), 20);
+        FlowPanel panel = new FlowPanel();
+        Label label = new Label();
+        label.setText(locale.authorizationDialogText(productInfoDataProvider.getName()));
+        panel.add(label);
+        panel.add(new InlineHTML("<a href=" + productInfoDataProvider.getOAuthDocUrl() + "style=\"color:" + getLinkColor() + "\" target=\"_blank\">Read more</a>"));
+        contentPanel.addNorth(panel, 20);
         contentPanel.addNorth(isGenerateKeys, 20);
     }
 

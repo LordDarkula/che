@@ -52,4 +52,10 @@ public interface ProductInfoDataProvider {
      * @return title for support action which displayed in Help menu.
      */
     String getSupportTitle();
+
+    String getOAuthDocUrl();
+
+    String getSSHDocUrl();
+
+    String getSVNCredentialsDocUrl();
 }

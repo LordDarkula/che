@@ -40,18 +40,22 @@ public class CheProductInfoDataProvider implements ProductInfoDataProvider {
         return locale.getProductName();
     }
 
+    @Override
     public String getSupportLink() {
         return locale.getSupportLink();
     }
 
+    @Override
     public String getDocumentTitle() {
         return locale.cheTabTitle();
     }
 
+    @Override
     public String getDocumentTitle(String workspaceName) {
         return locale.cheTabTitle(workspaceName);
     }
 
+    @Override
     public SVGResource getLogo() {
         return resources.logo();
     }
@@ -59,5 +63,20 @@ public class CheProductInfoDataProvider implements ProductInfoDataProvider {
     @Override
     public String getSupportTitle() {
         return locale.supportTitle();
+    }
+
+    @Override
+    public String getOAuthDocUrl() {
+        return "https://codenvy.readme.io/v5.0/docs/version-control#using-oauth";
+    }
+
+    @Override
+    public String getSSHDocUrl() {
+        return "https://codenvy.readme.io/v5.0/docs/version-control#using-ssh";
+    }
+
+    @Override
+    public String getSVNCredentialsDocUrl() {
+        return "";
     }
 }

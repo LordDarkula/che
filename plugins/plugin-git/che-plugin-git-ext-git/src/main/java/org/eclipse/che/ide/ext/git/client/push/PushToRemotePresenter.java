@@ -343,6 +343,7 @@ public class PushToRemotePresenter implements PushToRemoteView.ActionDelegate {
         notification.setStatus(FAIL);
         if (throwable instanceof UnauthorizedException) {
             console.printError(constant.messagesNotAuthorized());
+            console.print("<a href=\"dffgjfj\" style=\"color:#94b6d4\" target=\"_blank\">Read more</a>");
             notification.setTitle(constant.messagesNotAuthorized());
             return;
         }
